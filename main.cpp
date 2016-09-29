@@ -11,51 +11,26 @@ enum
 #include "agg_rasterizer_scanline_aa.h" 
 #include "agg_renderer_scanline.h" 
 #include "agg_path_storage.h" 
-//#include "agg_vcgen_stroke.h"
 #include "agg_conv_stroke.h" 
+
+#include "agg_conv_bspline.h"
+#include "agg_conv_smooth_poly1.h"
+
+#include "world.h"
 
 #include <iostream> 
 using namespace std; 
 
 int main(int argc, char * argv[]) 
 { 
-    
-   //initialize SDL 
-   //-------------- 
-   atexit(SDL_Quit); 
-   SDL_Init(SDL_INIT_VIDEO); 
-   SDL_Window* win = SDL_CreateWindow 
-   ( 
-      "SDL&AGG", 
-      SDL_WINDOWPOS_CENTERED, 
-      SDL_WINDOWPOS_CENTERED, 
-      frame_width, 
-      frame_height, 
-      0 
-   ); 
-   SDL_Renderer* ren = SDL_CreateRenderer 
-   ( 
-      win, 
-      -1, 
-      0 
-   ); 
-                   
-   //initialize AGG with memory allocated manually 
-   uint8_t *tex_pixels = new uint8_t[frame_width*frame_height*4]; 
-   int tex_pitch = frame_width*4; 
-    
-   #if SDL_BYTEORDER == SDL_BIG_ENDIAN 
-   #define AGG_RGBA32_BYTE_ORDER agg::pixfmt_rgba32 
-   #else 
-   #define AGG_RGBA32_BYTE_ORDER agg::pixfmt_abgr32 
-   #endif                   
+  world w(frame_width, frame_height);  
 
    agg::rendering_buffer rbuf 
    ( 
-      (unsigned char*)tex_pixels, 
+      (unsigned char*)w.texbuf->pixels, 
       frame_width, 
       frame_height, 
-      tex_pitch 
+      w.texbuf->pitch 
    ); 
     
    AGG_RGBA32_BYTE_ORDER pixf(rbuf); 
@@ -68,23 +43,46 @@ int main(int argc, char * argv[])
       < 
          AGG_RGBA32_BYTE_ORDER 
       > 
-   > rscan(rbase); 
+   > rscan(rbase);
+   
    agg::path_storage path;
-   agg::conv_stroke<agg::path_storage> stroke(path); 
-       
-   SDL_Texture* tex = SDL_CreateTexture 
-   ( 
-      ren, 
-      SDL_PIXELFORMAT_RGBA8888, 
-      SDL_TEXTUREACCESS_STATIC, 
-      frame_width, 
-      frame_height 
-   ); 
-    
+   
+	//--smoothed lines
+	agg::conv_smooth_poly1
+	<
+		agg::path_storage
+	> smooth(path);
+	
+	agg::conv_curve
+	<
+		agg::conv_smooth_poly1
+		<
+			agg::path_storage
+		>
+	> curve(smooth);
+	
+	agg::conv_stroke
+	<
+		agg::conv_curve
+		<
+			agg::conv_smooth_poly1
+			<
+				agg::path_storage
+			>
+		>
+	> stroke(curve);
+	
+	//--straight lines
+	agg::conv_stroke
+	<
+		agg::path_storage
+	> lines(path);
+	
    rbase.clear(agg::rgba8(75, 75, 75, 255)); 
    rscan.color(agg::rgba8(255, 100, 0, 255)); 
 
    float brush_width = 1.0; 
+   smooth.smooth_value(0.5);
 
    stroke.width(brush_width); 
    stroke.line_cap(agg::round_cap); 
@@ -93,7 +91,7 @@ int main(int argc, char * argv[])
    //main event loop 
    //--------------- 
    SDL_Event e; 
-   SDL_Point a, b; 
+   SDL_Point a; 
    while(1) //loop until user quits 
    { 
       while(SDL_PollEvent(&e)) 
@@ -118,11 +116,8 @@ int main(int argc, char * argv[])
             case SDL_MOUSEMOTION: 
                if(e.motion.state & SDL_BUTTON_LMASK) 
                { 
-                  SDL_GetMouseState(&b.x, &b.y);
-                  path.move_to(a.x, a.y); 
-                  path.line_to(b.x, b.y); 
-                   
-                  a=b; 
+                  SDL_GetMouseState(&a.x, &a.y);
+                  path.line_to(a.x, a.y); 
                } 
                break; 
                 
@@ -130,39 +125,45 @@ int main(int argc, char * argv[])
                brush_width += e.wheel.y/1.0; 
                if(brush_width < 0) 
                brush_width = 0; 
-               stroke.width(brush_width); 
+               stroke.width(brush_width);
             break; 
          } 
       } 
-       
-      ras.add_path(stroke); 
-      rbase.clear(agg::rgba8(75, 75, 75, 255));
-      agg::render_scanlines(ras, scanline, rscan); 
+
+
+	  rbase.clear(agg::rgba8(75, 75, 75, 255));
+
+      ras.add_path(stroke);//conv_curve::conv_smooth
+      rscan.color(agg::rgba8(255, 100, 0, 255));
+      agg::render_scanlines(ras, scanline, rscan);
+      
+      //ras.add_path(lines);
+      rscan.color(agg::rgba8(0, 255, 0, 255));
+      agg::render_scanlines(ras, scanline, rscan);
+      
       //path.remove_all(); 
        
       SDL_UpdateTexture 
       ( 
-         tex, 
+         w.tex, 
          NULL, 
-         tex_pixels, 
-         tex_pitch 
+         w.texbuf->pixels, 
+         w.texbuf->pitch 
       ); 
        
       SDL_RenderCopy 
       ( 
-         ren, 
-         tex, 
+         w.ren, 
+         w.tex, 
          NULL, 
          NULL 
       ); 
 
-      SDL_RenderPresent(ren); 
-      SDL_Delay(1); //speedbump 
+      SDL_RenderPresent(w.ren); 
+      SDL_Delay(100); //speedbump 
    } 
-    
-   delete [] tex_pixels; 
-   SDL_DestroyRenderer(ren); 
-   SDL_DestroyTexture(tex); 
+
+
     
    return 0; 
 } 

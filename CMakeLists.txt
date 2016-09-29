@@ -1,7 +1,7 @@
 cmake_minimum_required (VERSION 3.0.0)
 
 PROJECT(draw)
-add_executable(draw main.cpp)
+add_executable(draw main.cpp world.cpp)
 
 SET (CMAKE_MODULE_PATH "${draw_SOURCE_DIR}")
 
